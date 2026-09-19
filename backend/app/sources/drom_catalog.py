@@ -27,7 +27,7 @@ class DromCatalogResolver:
     @staticmethod
     def _first_int(html: str, names: tuple[str, ...]) -> int | None:
         for name in names:
-            pattern = rf"[\\\"']{re.escape(name)}[\\\"']\\s*[:=]\\s*[\\\"']?(\\d+)"
+            pattern = rf"""["']{re.escape(name)}["']\s*[:=]\s*["']?(\d+)"""
             match = re.search(pattern, html)
             if match:
                 return int(match.group(1))
@@ -38,7 +38,7 @@ class DromCatalogResolver:
         match = re.search(r"<title[^>]*>(.*?)</title>", html, flags=re.I | re.S)
         if not match:
             return None
-        return re.sub(r"\\s+", " ", re.sub(r"<[^>]+>", "", match.group(1))).strip() or None
+        return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", match.group(1))).strip() or None
 
     def resolve_url(self, url: str) -> CatalogResponse:
         html = self._fetch(url)
