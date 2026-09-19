@@ -22,6 +22,14 @@ class DromAdapter(MarketplaceAdapter):
         if query.power_max_hp is not None: p["maxEnginePower"] = query.power_max_hp
         if query.mileage_min is not None: p["minMileageKm"] = query.mileage_min
         if query.mileage_max is not None: p["maxMileageKm"] = query.mileage_max
+        if query.fuel is not None:
+            p["fuelType"] = {"petrol": "1", "diesel": "2", "hybrid": "3", "electric": "4"}.get(query.fuel.value, query.fuel.value)
+        if query.transmission is not None:
+            p["transmissionType"] = {"automatic": "1", "manual": "2", "robot": "3", "cvt": "4"}.get(query.transmission.value, query.transmission.value)
+        if query.drivetrain is not None:
+            p["driveType"] = {"fwd": "1", "rwd": "2", "awd": "3"}.get(query.drivetrain.value, query.drivetrain.value)
+        if query.region and query.region.isdigit():
+            p["regionId"] = int(query.region)
 
         native = query.source_params.get(self.name, {})
         allowed = {
