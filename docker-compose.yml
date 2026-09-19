@@ -1,0 +1,10 @@
+services:
+  backend:
+    image: python:3.12-slim
+    working_dir: /app
+    volumes: [./backend:/app]
+    command: sh -c "pip install -e /project && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    volumes:
+      - ./backend:/app
+      - ./:/project
+    ports: ["8000:8000"]
