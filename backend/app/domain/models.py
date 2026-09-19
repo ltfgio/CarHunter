@@ -14,6 +14,34 @@ class DrivetrainType(str, Enum):
 class AspirationType(str, Enum):
     na="na"; turbo="turbo"; twin_turbo="twin_turbo"; supercharger="supercharger"; other="other"
 
+class EngineLayout(str, Enum):
+    single="single"
+    twin="twin"
+    inline_3="inline_3"
+    inline_4="inline_4"
+    inline_5="inline_5"
+    inline_6="inline_6"
+    inline_8="inline_8"
+    v4="v4"
+    v6="v6"
+    v8="v8"
+    v10="v10"
+    v12="v12"
+    v16="v16"
+    flat_2="flat_2"
+    flat_4="flat_4"
+    flat_6="flat_6"
+    flat_8="flat_8"
+    vr5="vr5"
+    vr6="vr6"
+    vr8="vr8"
+    w8="w8"
+    w12="w12"
+    w16="w16"
+    rotary="rotary"
+    electric_motor="electric_motor"
+    other="other"
+
 class FilterOperator(str, Enum):
     eq="eq"; ne="ne"; gt="gt"; gte="gte"; lt="lt"; lte="lte"; in_="in"; not_in="not_in"; contains="contains"; not_contains="not_contains"; starts_with="starts_with"; ends_with="ends_with"; exists="exists"; between="between"
 
@@ -31,6 +59,9 @@ class SearchQuery(BaseModel):
     model: str|None=None
     generation: str|None=None
     body_type: str|None=None
+    engine_code: str|None=None
+    engine_family: str|None=None
+    engine_layout: EngineLayout|None=None
     year_min: int|None=Field(None, ge=1886)
     year_max: int|None=Field(None, ge=1886)
     price_min: int|None=Field(None, ge=0)
@@ -44,6 +75,8 @@ class SearchQuery(BaseModel):
     cylinders_max: int|None=Field(None, ge=1)
     power_min_hp: int|None=Field(None, ge=0)
     power_max_hp: int|None=Field(None, ge=0)
+    torque_min_nm: int|None=Field(None, ge=0)
+    torque_max_nm: int|None=Field(None, ge=0)
     transmission: TransmissionType|None=None
     drivetrain: DrivetrainType|None=None
     aspiration: AspirationType|None=None
@@ -57,7 +90,15 @@ class SearchQuery(BaseModel):
 
     @model_validator(mode="after")
     def validate_ranges(self):
-        for lo, hi, name in [(self.year_min,self.year_max,"year"),(self.price_min,self.price_max,"price"),(self.mileage_min,self.mileage_max,"mileage"),(self.displacement_min_l,self.displacement_max_l,"displacement"),(self.cylinders_min,self.cylinders_max,"cylinders"),(self.power_min_hp,self.power_max_hp,"power")]:
+        for lo, hi, name in [
+            (self.year_min,self.year_max,"year"),
+            (self.price_min,self.price_max,"price"),
+            (self.mileage_min,self.mileage_max,"mileage"),
+            (self.displacement_min_l,self.displacement_max_l,"displacement"),
+            (self.cylinders_min,self.cylinders_max,"cylinders"),
+            (self.power_min_hp,self.power_max_hp,"power"),
+            (self.torque_min_nm,self.torque_max_nm,"torque"),
+        ]:
             if lo is not None and hi is not None and lo > hi:
                 raise ValueError(f"{name}_min cannot be greater than {name}_max")
         return self
@@ -74,10 +115,14 @@ class Listing(BaseModel):
     model: str|None=None
     generation: str|None=None
     body_type: str|None=None
+    engine_code: str|None=None
+    engine_family: str|None=None
+    engine_layout: EngineLayout|None=None
     fuel: FuelType|None=None
     displacement_l: float|None=None
     cylinders: int|None=None
     power_hp: int|None=None
+    torque_nm: int|None=None
     transmission: TransmissionType|None=None
     drivetrain: DrivetrainType|None=None
     aspiration: AspirationType|None=None
