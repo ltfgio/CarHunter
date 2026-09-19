@@ -68,6 +68,8 @@ class SearchQuery(BaseModel):
     keywords: list[str]=Field(default_factory=list)
     exclude_keywords: list[str]=Field(default_factory=list)
     sources: list[str]=Field(default_factory=list)
+    # Source-specific native IDs/parameters, e.g. {"drom": {"firmId": 9, "modelId": 7}}.
+    source_params: dict[str, dict[str, Any]]=Field(default_factory=dict)
     filters: FilterGroup|None=None
     limit: int=Field(50, ge=1, le=200)
     sort: Literal["relevance","price_asc","price_desc","year_desc","mileage_asc"]="relevance"
