@@ -25,6 +25,8 @@ export default function App(){
   const [sourceCaps,setSourceCaps]=useState<Record<string,{listing_search:boolean;catalog:boolean}>>({});
   const [dromUrl,setDromUrl]=useState("");
   const [dromNative,setDromNative]=useState<Record<string,number>>({});
+  const [dromBrowserUrl,setDromBrowserUrl]=useState("https://auto.drom.ru/");
+  const [dromBrowser,setDromBrowser]=useState<CatalogNode[]>([]);
 
   useEffect(()=>{
     fetch("/api/filter-fields").then(r=>r.json()).then(setFields).catch(()=>setStatus("Не удалось загрузить каталог фильтров"));
@@ -60,6 +62,20 @@ export default function App(){
     loadCatalog(lookup);
   };
   const selectedTech=catalog.find(x=>x.id===selected.tech);
+  async function browseDrom(url:string){
+    setDromBrowserUrl(url);
+    try{
+      const r=await fetch("/api/catalog/drom/children?url="+encodeURIComponent(url));
+      if(!r.ok) throw new Error();
+      const data=await r.json();
+      setDromBrowser(data.nodes||[]);
+      const rr=await fetch("/api/catalog/drom?url="+encodeURIComponent(url));
+      if(rr.ok){
+        const n=(await rr.json()).nodes?.[0]; const raw=n?.raw||{};
+        setDromNative(Object.fromEntries(Object.entries(raw).filter(([k])=>["firmId","modelId","generationNumber","restylingNumber"].includes(k)&&typeof raw[k]==="number")));
+      }
+    }catch{setDromBrowser([]);}
+  }
   const meta=(field:string)=>fields.find(x=>x.field===field);
   const addCondition=(gid:number)=>setGroups(gs=>gs.map(g=>g.id===gid?{...g,conditions:[...g.conditions,{id:Date.now(),field:fields[0]?.field||"brand",op:"eq",value:""}]}:g));
   const removeCondition=(gid:number,cid:number)=>setGroups(gs=>gs.map(g=>g.id===gid?{...g,conditions:g.conditions.filter(c=>c.id!==cid)}:g).filter(g=>g.conditions.length||gs.length===1));
@@ -90,6 +106,8 @@ export default function App(){
         <div className="groupHead"><span>Каталог Drom</span><small>вставь публичную ссылку Drom для извлечения native ID</small></div>
         <div className="condition"><input placeholder="https://auto.drom.ru/bmw/5-series/" value={dromUrl} onChange={e=>setDromUrl(e.target.value)}/><button className="secondary" onClick={async()=>{try{const r=await fetch("/api/catalog/drom?url="+encodeURIComponent(dromUrl));if(!r.ok)throw new Error();const n=(await r.json()).nodes?.[0];const raw=n?.raw||{};setDromNative(Object.fromEntries(Object.entries(raw).filter(([k])=>["firmId","modelId","generationNumber","restylingNumber"].includes(k)&&typeof raw[k]==="number")));setStatus("Drom ID получены");}catch{setStatus("Не удалось разобрать Drom-ссылку")}}}>Разобрать</button></div>
         {Object.keys(dromNative).length>0&&<div className="listingSpecs">{Object.entries(dromNative).map(([k,v])=><span key={k}>{k}: {v}</span>)}</div>}
+        <div className="condition"><input value={dromBrowserUrl} onChange={e=>setDromBrowserUrl(e.target.value)}/><button className="secondary" onClick={()=>browseDrom(dromBrowserUrl)}>Открыть каталог</button></div>
+        {dromBrowser.length>0&&<div className="dromLinks">{dromBrowser.slice(0,40).map(x=><button className="ghost" key={x.id} onClick={()=>browseDrom(x.id)}>{x.name}</button>)}</div>}
         <div className="groupHead"><span>Каталог Auto.ru</span><small>{catalogLoading?"Загрузка…":catalog.length?`${catalog.length} вариантов`:""}</small></div>
         <div className="condition">
           <select value={selected.mark} onChange={e=>choose("mark",e.target.value)}><option value="">Марка</option>{level("mark").map(x=><option key={x.id} value={x.id}>{x.name} · {fmt(x.offers_count)}</option>)}</select>
