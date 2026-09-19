@@ -96,9 +96,19 @@ def search(query: SearchQuery) -> SearchResponse:
         raise HTTPException(status_code=400, detail=f"Unknown sources: {', '.join(unknown)}")
     selected = query.sources or sorted(adapters)
     listings = []
+    source_status: dict[str, dict] = {}
     for name in selected:
-        listings.extend(adapters[name].search(query))
+        adapter = adapters[name]
+        listings.extend(adapter.search(query))
+        status = getattr(adapter, "last_status", None)
+        if isinstance(status, dict):
+            source_status[name] = status
     listings = deduplicate(listings)
     listings = apply_legacy_filters(listings, query)
     listings = sort_listings(listings, query.sort)
-    return SearchResponse(query=query, total=len(listings), listings=listings[:query.limit])
+    return SearchResponse(
+    query=query,
+    total=len(listings),
+    listings=listings[:query.limit],
+    source_status=source_status,
+    )
