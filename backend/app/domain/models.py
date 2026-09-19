@@ -130,3 +130,4 @@ class SearchResponse(BaseModel):
     query: SearchQuery
     total: int
     listings: list[Listing]
+    source_status: dict[str, dict[str, Any]] = Field(default_factory=dict)
