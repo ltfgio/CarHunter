@@ -1,4 +1,4 @@
-from app.domain.models import FilterCondition, FilterGroup, FilterOperator, Listing, SearchQuery
+from app.domain.models import EngineLayout, FilterCondition, FilterGroup, FilterOperator, Listing, SearchQuery
 from app.engine.filtering import apply_legacy_filters, match_group, sort_listings
 
 
@@ -22,3 +22,26 @@ def test_range_and_keywords():
 def test_sort():
     items = [car(price_rub=2_000_000), car(price_rub=1_000_000)]
     assert sort_listings(items, "price_asc")[0].price_rub == 1_000_000
+
+
+def test_derived_engine_layout_and_aspiration():
+    result = apply_legacy_filters(
+        [car(title="Mercedes S600 V12 biturbo", engine_layout=None, aspiration=None, cylinders=None)],
+        SearchQuery(engine_layout=EngineLayout.v12, cylinders_min=12, aspiration="twin_turbo"),
+    )
+    assert len(result) == 1
+    assert result[0].engine_layout == EngineLayout.v12
+    assert result[0].cylinders == 12
+
+def test_torque_filter_and_exclusion_keyword():
+    items = [
+        car(title="BMW 550i V8 twin turbo", torque_nm=600),
+        car(title="BMW 550i V8 twin turbo битый", torque_nm=600),
+        car(title="BMW 550i V8 twin turbo", torque_nm=450),
+    ]
+    result = apply_legacy_filters(
+        items,
+        SearchQuery(torque_min_nm=500, exclude_keywords=["битый"]),
+    )
+    assert len(result) == 1
+    assert result[0].torque_nm == 600
