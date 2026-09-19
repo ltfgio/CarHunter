@@ -20,14 +20,22 @@ export default function App(){
   const [results,setResults]=useState<Listing[]>([]);
   const [catalog,setCatalog]=useState<CatalogNode[]>([]);
   const [selected,setSelected]=useState({mark:"",model:"",generation:"",configuration:"",tech:""});
+  const [selectedNames,setSelectedNames]=useState({mark:"",model:"",generation:"",configuration:""});
   const [catalogLoading,setCatalogLoading]=useState(false);
+  const [sourceCaps,setSourceCaps]=useState<Record<string,{listing_search:boolean;catalog:boolean}>>({});
+  const [dromUrl,setDromUrl]=useState("");
+  const [dromNative,setDromNative]=useState<Record<string,number>>({});
 
-  useEffect(()=>{fetch("/api/filter-fields").then(r=>r.json()).then(setFields).catch(()=>setStatus("Не удалось загрузить каталог фильтров"));loadCatalog([]);},[]);
+  useEffect(()=>{
+    fetch("/api/filter-fields").then(r=>r.json()).then(setFields).catch(()=>setStatus("Не удалось загрузить каталог фильтров"));
+    fetch("/api/source-capabilities").then(r=>r.json()).then(setSourceCaps).catch(()=>{});
+    loadCatalog([]);
+  },[]);
 
   async function loadCatalog(lookup:string[]){
     setCatalogLoading(true);
     try{
-      const qs=lookup.length?"?"+lookup.map(x=>"bc_lookup="+encodeURIComponent(x)).join("&"):"";
+      const qs=lookup.length?"?bc_lookup="+encodeURIComponent(lookup.join("#")):"";
       const r=await fetch("/api/catalog/autoru"+qs);
       if(!r.ok) throw new Error();
       const data=await r.json(); setCatalog(data.nodes||[]);
@@ -42,6 +50,12 @@ export default function App(){
     if(key==="generation") Object.assign(next,{configuration:"",tech:""});
     if(key==="configuration") Object.assign(next,{tech:""});
     setSelected(next);
+    const picked=catalog.find(x=>x.id===value);
+    const names={...selectedNames,[key]:picked?.name||""};
+    if(key==="mark") Object.assign(names,{model:"",generation:"",configuration:""});
+    if(key==="model") Object.assign(names,{generation:"",configuration:""});
+    if(key==="generation") Object.assign(names,{configuration:""});
+    setSelectedNames(names);
     const lookup=[next.mark,next.model,next.generation,next.configuration].filter(Boolean);
     loadCatalog(lookup);
   };
@@ -56,11 +70,11 @@ export default function App(){
   async function search(){
     setStatus("Ищу по источникам…");
     const conditions=groups.flatMap(g=>g.conditions.filter(c=>c.value||c.op==="exists").map(c=>({field:c.field,operator:c.op,value:c.op==="between"?c.value.split(",").map(Number):c.value})));
-    if(selected.mark) conditions.push({field:"brand",operator:"eq",value:selected.mark});
-    if(selected.model) conditions.push({field:"model",operator:"eq",value:selected.model});
-    if(selected.generation) conditions.push({field:"generation",operator:"eq",value:selected.generation});
+    if(selectedNames.mark) conditions.push({field:"brand",operator:"eq",value:selectedNames.mark});
+    if(selectedNames.model) conditions.push({field:"model",operator:"eq",value:selectedNames.model});
+    if(selectedNames.generation) conditions.push({field:"generation",operator:"eq",value:selectedNames.generation});
     try{
-      const r=await fetch("/api/search",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sources:Object.entries(sourceState).filter(([,v])=>v).map(([k])=>k),limit:50,filters:{logic:"and",conditions}})});
+      const r=await fetch("/api/search",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sources:Object.entries(sourceState).filter(([,v])=>v).map(([k])=>k),limit:50,source_params:{drom:dromNative},filters:{logic:"and",conditions}})});
       if(!r.ok) throw new Error();
       const data=await r.json(); setResults(data.listings||[]); setStatus(`Найдено: ${data.total}`);
     }catch{setResults([]);setStatus("Ошибка запроса к API");}
@@ -70,9 +84,12 @@ export default function App(){
     <header><div className="logo">CAR<span>HUNTER</span></div><div className="status">{status}</div></header>
     <section className="hero"><h1>Найди машину<br/><em>без ограничений.</em></h1><p>Единый поиск по автомобильным площадкам с нормализованными фильтрами.</p></section>
     <section className="panel">
-      <div className="sources"><b>Источники</b>{sources.map(x=><label key={x}><input type="checkbox" checked={sourceState[x]} onChange={e=>setSourceState({...sourceState,[x]:e.target.checked})}/>{labels[x]}</label>)}</div>
+      <div className="sources"><b>Источники</b>{sources.map(x=><label key={x}><input type="checkbox" checked={sourceState[x]} disabled={sourceCaps[x]&&!sourceCaps[x].listing_search} onChange={e=>setSourceState({...sourceState,[x]:e.target.checked})}/>{labels[x]}{sourceCaps[x]&&!sourceCaps[x].listing_search?" · каталог":""}</label>)}</div>
 
       <div className="catalogPicker">
+        <div className="groupHead"><span>Каталог Drom</span><small>вставь публичную ссылку Drom для извлечения native ID</small></div>
+        <div className="condition"><input placeholder="https://auto.drom.ru/bmw/5-series/" value={dromUrl} onChange={e=>setDromUrl(e.target.value)}/><button className="secondary" onClick={async()=>{try{const r=await fetch("/api/catalog/drom?url="+encodeURIComponent(dromUrl));if(!r.ok)throw new Error();const n=(await r.json()).nodes?.[0];const raw=n?.raw||{};setDromNative(Object.fromEntries(Object.entries(raw).filter(([k])=>["firmId","modelId","generationNumber","restylingNumber"].includes(k)&&typeof raw[k]==="number")));setStatus("Drom ID получены");}catch{setStatus("Не удалось разобрать Drom-ссылку")}}}>Разобрать</button></div>
+        {Object.keys(dromNative).length>0&&<div className="listingSpecs">{Object.entries(dromNative).map(([k,v])=><span key={k}>{k}: {v}</span>)}</div>}
         <div className="groupHead"><span>Каталог Auto.ru</span><small>{catalogLoading?"Загрузка…":catalog.length?`${catalog.length} вариантов`:""}</small></div>
         <div className="condition">
           <select value={selected.mark} onChange={e=>choose("mark",e.target.value)}><option value="">Марка</option>{level("mark").map(x=><option key={x.id} value={x.id}>{x.name} · {fmt(x.offers_count)}</option>)}</select>
