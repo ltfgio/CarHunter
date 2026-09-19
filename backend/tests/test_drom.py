@@ -59,3 +59,16 @@ def test_drom_listing_normalization():
     assert listing.mileage_km == 180000
     assert listing.displacement_l == 3.0
     assert listing.power_hp == 258
+
+
+def test_drom_maps_unified_enums():
+    from app.domain.models import FuelType, TransmissionType, DrivetrainType
+    query = SearchQuery(
+        fuel=FuelType.diesel,
+        transmission=TransmissionType.automatic,
+        drivetrain=DrivetrainType.awd,
+    )
+    params = DromAdapter()._params(query)
+    assert params["fuelType"] == "2"
+    assert params["transmissionType"] == "1"
+    assert params["driveType"] == "3"
