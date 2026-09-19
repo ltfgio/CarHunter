@@ -27,7 +27,7 @@ class DromCatalogResolver:
     @staticmethod
     def _first_int(html: str, names: tuple[str, ...]) -> int | None:
         for name in names:
-            pattern = rf'["\\']{re.escape(name)}["\\']\\s*[:=]\\s*["\\']?(\\d+)'
+            pattern = rf"[\\\"']{re.escape(name)}[\\\"']\\s*[:=]\\s*[\\\"']?(\\d+)"
             match = re.search(pattern, html)
             if match:
                 return int(match.group(1))
