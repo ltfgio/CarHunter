@@ -27,6 +27,7 @@ export default function App(){
   const [dromNative,setDromNative]=useState<Record<string,number>>({});
   const [dromBrowserUrl,setDromBrowserUrl]=useState("https://auto.drom.ru/");
   const [dromBrowser,setDromBrowser]=useState<CatalogNode[]>([]);
+  const [autoruUrl,setAutoruUrl]=useState("");
 
   useEffect(()=>{
     fetch("/api/filter-fields").then(r=>r.json()).then(setFields).catch(()=>setStatus("Не удалось загрузить каталог фильтров"));
@@ -90,9 +91,9 @@ export default function App(){
     if(selectedNames.model) conditions.push({field:"model",operator:"eq",value:selectedNames.model});
     if(selectedNames.generation) conditions.push({field:"generation",operator:"eq",value:selectedNames.generation});
     try{
-      const r=await fetch("/api/search",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sources:Object.entries(sourceState).filter(([,v])=>v).map(([k])=>k),limit:50,source_params:{drom:dromNative},filters:{logic:"and",conditions}})});
+      const r=await fetch("/api/search",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sources:Object.entries(sourceState).filter(([,v])=>v).map(([k])=>k),limit:50,source_params:{drom:dromNative,...(autoruUrl?{autoru:{url:autoruUrl}}:{})},filters:{logic:"and",conditions}})});
       if(!r.ok) throw new Error();
-      const data=await r.json(); setResults(data.listings||[]); setStatus(`Найдено: ${data.total}`);
+      const data=await r.json(); setResults(data.listings||[]); const diagnostics=Object.entries(data.source_status||{}).map(([name,s]:any)=>`${labels[name]||name}: ${s.state}`).join(" · "); setStatus(`${data.total?"Найдено: "+data.total:"Ничего не найдено"}${diagnostics?" · "+diagnostics:""}`);
     }catch{setResults([]);setStatus("Ошибка запроса к API");}
   }
 
@@ -108,6 +109,8 @@ export default function App(){
         {Object.keys(dromNative).length>0&&<div className="listingSpecs">{Object.entries(dromNative).map(([k,v])=><span key={k}>{k}: {v}</span>)}</div>}
         <div className="condition"><input value={dromBrowserUrl} onChange={e=>setDromBrowserUrl(e.target.value)}/><button className="secondary" onClick={()=>browseDrom(dromBrowserUrl)}>Открыть каталог</button></div>
         {dromBrowser.length>0&&<div className="dromLinks">{dromBrowser.slice(0,40).map(x=><button className="ghost" key={x.id} onClick={()=>browseDrom(x.id)}>{x.name}</button>)}</div>}
+        <div className="groupHead"><span>Auto.ru тестовая ссылка</span><small>необязательно: вставь готовую публичную ссылку поиска</small></div>
+        <div className="condition"><input placeholder="https://auto.ru/cars/used/..." value={autoruUrl} onChange={e=>setAutoruUrl(e.target.value)}/><button className="secondary" onClick={()=>setStatus("Ссылка Auto.ru сохранена")}>Использовать</button></div>
         <div className="groupHead"><span>Каталог Auto.ru</span><small>{catalogLoading?"Загрузка…":catalog.length?`${catalog.length} вариантов`:""}</small></div>
         <div className="condition">
           <select value={selected.mark} onChange={e=>choose("mark",e.target.value)}><option value="">Марка</option>{level("mark").map(x=><option key={x.id} value={x.id}>{x.name} · {fmt(x.offers_count)}</option>)}</select>
