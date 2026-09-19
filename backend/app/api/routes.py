@@ -1,6 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from app.domain.models import SearchQuery, SearchResponse, EngineLayout
+from app.domain.catalog import CatalogResponse
 from app.sources.registry import adapters
+from app.sources.autoru_catalog import client as autoru_catalog
 from app.engine.dedup import deduplicate
 from app.engine.filtering import apply_legacy_filters, sort_listings
 
@@ -44,16 +46,11 @@ FILTER_FIELDS = [
     {"field":"doors","label":"Двери","type":"number","unit":"шт.","operators":["eq","ne","gt","gte","lt","lte","between"]},
     {"field":"seats","label":"Места","type":"number","unit":"шт.","operators":["eq","ne","gt","gte","lt","lte","between"]},
     {"field":"owner_count","label":"Владельцы","type":"number","unit":"шт.","operators":["eq","ne","gt","gte","lt","lte","between"]},
-    {"field":"fuel","label":"Топливо","type":"enum","operators":["eq","ne","in","not_in"],
-     "options":enum_options(["petrol","diesel","hybrid","electric","other"])},
-    {"field":"transmission","label":"Коробка","type":"enum","operators":["eq","ne","in","not_in"],
-     "options":enum_options(["manual","automatic","robot","cvt","other"])},
-    {"field":"drivetrain","label":"Привод","type":"enum","operators":["eq","ne","in","not_in"],
-     "options":enum_options(["fwd","rwd","awd","other"])},
-    {"field":"aspiration","label":"Наддув","type":"enum","operators":["eq","ne","in","not_in"],
-     "options":enum_options(["na","turbo","twin_turbo","supercharger","other"])},
-    {"field":"steering_side","label":"Руль","type":"enum","operators":["eq","ne","in","not_in"],
-     "options":[{"value":"left","label":"Левый"},{"value":"right","label":"Правый"},{"value":"unknown","label":"Не указан"}]},
+    {"field":"fuel","label":"Топливо","type":"enum","operators":["eq","ne","in","not_in"],"options":enum_options(["petrol","diesel","hybrid","electric","other"])},
+    {"field":"transmission","label":"Коробка","type":"enum","operators":["eq","ne","in","not_in"],"options":enum_options(["manual","automatic","robot","cvt","other"])},
+    {"field":"drivetrain","label":"Привод","type":"enum","operators":["eq","ne","in","not_in"],"options":enum_options(["fwd","rwd","awd","other"])},
+    {"field":"aspiration","label":"Наддув","type":"enum","operators":["eq","ne","in","not_in"],"options":enum_options(["na","turbo","twin_turbo","supercharger","other"])},
+    {"field":"steering_side","label":"Руль","type":"enum","operators":["eq","ne","in","not_in"],"options":[{"value":"left","label":"Левый"},{"value":"right","label":"Правый"},{"value":"unknown","label":"Не указан"}]},
     {"field":"seller_type","label":"Продавец","type":"string","operators":["eq","ne","contains","in","not_in"]},
     {"field":"region","label":"Регион","type":"string","operators":["eq","ne","contains","in","not_in"]},
     {"field":"text","label":"Текст объявления","type":"text","operators":["contains","not_contains"]},
@@ -67,6 +64,19 @@ def sources() -> list[str]:
 def filter_fields() -> list[dict]:
     return FILTER_FIELDS
 
+@router.get("/catalog/autoru", response_model=CatalogResponse)
+def autoru_catalog(
+    bc_lookup: list[str] = Query(default=[]),
+    state: str = Query(default="USED", pattern="^(NEW|USED|BEATEN)$"),
+    rid: list[str] = Query(default=[]),
+) -> CatalogResponse:
+    try:
+        return autoru_catalog.fetch(bc_lookup=bc_lookup, state=state, rid=rid)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Auto.ru catalog request failed: {exc}") from exc
+
 @router.post("/search", response_model=SearchResponse)
 def search(query: SearchQuery) -> SearchResponse:
     unknown = sorted(set(query.sources) - set(adapters))
@@ -76,12 +86,7 @@ def search(query: SearchQuery) -> SearchResponse:
     listings = []
     for name in selected:
         listings.extend(adapters[name].search(query))
-
     listings = deduplicate(listings)
     listings = apply_legacy_filters(listings, query)
     listings = sort_listings(listings, query.sort)
-    return SearchResponse(
-        query=query,
-        total=len(listings),
-        listings=listings[:query.limit],
-    )
+    return SearchResponse(query=query, total=len(listings), listings=listings[:query.limit])
