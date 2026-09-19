@@ -19,6 +19,9 @@ class AutoRuAdapter(MarketplaceAdapter):
     # public web listing and keeps parsing isolated from the official catalog client.
     capabilities = {"listing_search": True, "catalog": True}
 
+    def __init__(self) -> None:
+        self.last_status: dict[str, Any] = {"state": "idle"}
+
     def _url(self, query: SearchQuery) -> str:
         native = query.source_params.get(self.name, {})
         if native.get("url"):
@@ -98,17 +101,54 @@ class AutoRuAdapter(MarketplaceAdapter):
         return rows
 
     def search(self, query: SearchQuery) -> list[Listing]:
+        url = self._url(query)
+        self.last_status = {"state": "fetching", "url": url}
         try:
             response = httpx.get(
-                self._url(query),
+                url,
                 timeout=20.0,
                 follow_redirects=True,
-                headers={"User-Agent": "Mozilla/5.0 (compatible; CarHunter/0.1)"},
+                headers={
+                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/128.0 Safari/537.36 CarHunter/0.1",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.6",
+                    "Referer": "https://auto.ru/",
+                },
             )
             response.raise_for_status()
-        except httpx.HTTPError:
+        except httpx.TimeoutException as exc:
+            self.last_status = {"state": "timeout", "url": url, "error": str(exc)}
             return []
-        return [self._listing(row) for row in self._html_rows(response.text) if row.get("url")]
+        except httpx.HTTPStatusError as exc:
+            self.last_status = {
+                "state": "http_error", "url": url,
+                "status_code": exc.response.status_code,
+                "error": str(exc),
+            }
+            return []
+        except httpx.HTTPError as exc:
+            self.last_status = {"state": "network_error", "url": url, "error": str(exc)}
+            return []
+
+        final_url = str(response.url)
+        if any(marker in final_url.lower() for marker in ("/auth/", "/login", "passport.yandex")):
+            self.last_status = {
+                "state": "blocked_or_auth", "url": url, "final_url": final_url,
+                "status_code": response.status_code,
+            }
+            return []
+
+        rows = [row for row in self._html_rows(response.text) if row.get("url")]
+        listings = [self._listing(row) for row in rows]
+        self.last_status = {
+            "state": "ok" if listings else "empty",
+            "url": url,
+            "final_url": final_url,
+            "status_code": response.status_code,
+            "parsed_rows": len(rows),
+        }
+        return listings
 
     def _listing(self, row: dict[str, Any]) -> Listing:
         offers = row.get("offers") if isinstance(row.get("offers"), dict) else {}
@@ -123,7 +163,7 @@ class AutoRuAdapter(MarketplaceAdapter):
             title=str(row.get("name") or row.get("title") or "Auto.ru объявление"),
             price_rub=self._int(price),
             year=self._int(row.get("year") or row.get("productionDate")),
-            mileage_km=self._int(row.get("mileage") or row.get("km_age")),
+            mileage_km=self._int(row.get("mileage") or row.get("km_age") or self._nested_value(row.get("mileageFromOdometer"), "value")),
             brand=self._str(row.get("brand") or row.get("mark")),
             model=self._str(row.get("model")),
             generation=self._str(row.get("generation")),
@@ -137,6 +177,10 @@ class AutoRuAdapter(MarketplaceAdapter):
             description=self._str(row.get("description")),
             images=self._images(row),
         )
+
+    @staticmethod
+    def _nested_value(v: Any, key: str) -> Any:
+        return v.get(key) if isinstance(v, dict) else None
 
     @staticmethod
     def _source_id(url: str, row: dict[str, Any]) -> str:
