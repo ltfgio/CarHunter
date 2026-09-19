@@ -1,5 +1,6 @@
 from enum import Enum
-from pydantic import BaseModel, Field
+from typing import Any, Literal
+from pydantic import BaseModel, Field, model_validator
 
 class FuelType(str, Enum):
     petrol="petrol"; diesel="diesel"; hybrid="hybrid"; electric="electric"; other="other"
@@ -13,6 +14,18 @@ class DrivetrainType(str, Enum):
 class AspirationType(str, Enum):
     na="na"; turbo="turbo"; twin_turbo="twin_turbo"; supercharger="supercharger"; other="other"
 
+class FilterOperator(str, Enum):
+    eq="eq"; ne="ne"; gt="gt"; gte="gte"; lt="lt"; lte="lte"; in_="in"; not_in="not_in"; contains="contains"; not_contains="not_contains"; starts_with="starts_with"; ends_with="ends_with"; exists="exists"; between="between"
+
+class FilterCondition(BaseModel):
+    field: str = Field(min_length=1)
+    operator: FilterOperator
+    value: Any = None
+
+class FilterGroup(BaseModel):
+    logic: Literal["and", "or"] = "and"
+    conditions: list[FilterCondition | "FilterGroup"] = Field(default_factory=list)
+
 class SearchQuery(BaseModel):
     brand: str|None=None
     model: str|None=None
@@ -22,6 +35,7 @@ class SearchQuery(BaseModel):
     year_max: int|None=Field(None, ge=1886)
     price_min: int|None=Field(None, ge=0)
     price_max: int|None=Field(None, ge=0)
+    mileage_min: int|None=Field(None, ge=0)
     mileage_max: int|None=Field(None, ge=0)
     fuel: FuelType|None=None
     displacement_min_l: float|None=Field(None, ge=0)
@@ -37,7 +51,16 @@ class SearchQuery(BaseModel):
     keywords: list[str]=Field(default_factory=list)
     exclude_keywords: list[str]=Field(default_factory=list)
     sources: list[str]=Field(default_factory=list)
+    filters: FilterGroup|None=None
     limit: int=Field(50, ge=1, le=200)
+    sort: Literal["relevance","price_asc","price_desc","year_desc","mileage_asc"]="relevance"
+
+    @model_validator(mode="after")
+    def validate_ranges(self):
+        for lo, hi, name in [(self.year_min,self.year_max,"year"),(self.price_min,self.price_max,"price"),(self.mileage_min,self.mileage_max,"mileage"),(self.displacement_min_l,self.displacement_max_l,"displacement"),(self.cylinders_min,self.cylinders_max,"cylinders"),(self.power_min_hp,self.power_max_hp,"power")]:
+            if lo is not None and hi is not None and lo > hi:
+                raise ValueError(f"{name}_min cannot be greater than {name}_max")
+        return self
 
 class Listing(BaseModel):
     source: str
@@ -60,6 +83,10 @@ class Listing(BaseModel):
     aspiration: AspirationType|None=None
     region: str|None=None
     description: str|None=None
+    images: list[str]=Field(default_factory=list)
+    seller_type: str|None=None
+    seller_name: str|None=None
+    raw_url: str|None=None
 
 class SearchResponse(BaseModel):
     query: SearchQuery
