@@ -1,6 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from app.domain.models import SearchQuery, SearchResponse, EngineLayout
 from app.sources.registry import adapters
+from app.engine.dedup import deduplicate
+from app.engine.filtering import apply_legacy_filters, sort_listings
 
 router = APIRouter(prefix="/api")
 
@@ -70,6 +72,16 @@ def search(query: SearchQuery) -> SearchResponse:
     unknown = sorted(set(query.sources) - set(adapters))
     if unknown:
         raise HTTPException(status_code=400, detail=f"Unknown sources: {', '.join(unknown)}")
-    # Real marketplace adapters will be wired here. Keeping this endpoint deterministic
-    # lets the UI and filtering engine be developed independently from source access.
-    return SearchResponse(query=query, total=0, listings=[])
+    selected = query.sources or sorted(adapters)
+    listings = []
+    for name in selected:
+        listings.extend(adapters[name].search(query))
+
+    listings = deduplicate(listings)
+    listings = apply_legacy_filters(listings, query)
+    listings = sort_listings(listings, query.sort)
+    return SearchResponse(
+        query=query,
+        total=len(listings),
+        listings=listings[:query.limit],
+    )
