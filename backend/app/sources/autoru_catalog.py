@@ -17,9 +17,9 @@ class AutoRuCatalogClient:
         if not token:
             raise RuntimeError("AUTORU_API_TOKEN is not configured")
         params: list[tuple[str, str]] = [("state", state)]
-        for value in bc_lookup or []:
-            if value:
-                params.append(("bc_lookup", value))
+        lookup = "#".join(value for value in (bc_lookup or []) if value)
+        if lookup:
+            params.append(("bc_lookup", lookup))
         for value in rid or []:
             if value:
                 params.append(("rid", value))
