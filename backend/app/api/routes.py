@@ -3,6 +3,7 @@ from app.domain.models import SearchQuery, SearchResponse, EngineLayout
 from app.domain.catalog import CatalogResponse
 from app.sources.registry import adapters
 from app.sources.autoru_catalog import client as autoru_catalog
+from app.sources.drom_catalog import resolver as drom_catalog
 from app.engine.dedup import deduplicate
 from app.engine.filtering import apply_legacy_filters, sort_listings
 
