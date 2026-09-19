@@ -1,5 +1,5 @@
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 import httpx
 
@@ -9,6 +9,34 @@ DROM_HOSTS = {"auto.drom.ru", "www.drom.ru", "drom.ru"}
 
 
 class DromCatalogResolver:
+    source = "drom"
+
+    @staticmethod
+    def _catalog_links(html: str, base_url: str) -> list[CatalogNode]:
+        links: list[CatalogNode] = []
+        seen: set[str] = set()
+        for match in re.finditer(r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', html, flags=re.I | re.S):
+            href = urljoin(base_url, match.group(1))
+            parsed = urlparse(href)
+            if parsed.hostname not in DROM_HOSTS or not parsed.path.startswith("/"):
+                continue
+            if "/offer/" in parsed.path or parsed.path in {"/", ""}:
+                continue
+            name = re.sub(r"\\s+", " ", re.sub(r"<[^>]+>", "", match.group(2))).strip()
+            if not name or href in seen or len(name) > 120:
+                continue
+            if not ("/" in parsed.path.strip("/")):
+                continue
+            seen.add(href)
+            links.append(CatalogNode(
+                id=href,
+                name=name,
+                level="drom_link",
+                offers_count=0,
+                raw={"url": href},
+            ))
+        return links[:200]
+
     source = "drom"
 
     def _fetch(self, url: str) -> str:
@@ -39,6 +67,11 @@ class DromCatalogResolver:
         if not match:
             return None
         return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", match.group(1))).strip() or None
+
+    def children(self, url: str) -> CatalogResponse:
+        html = self._fetch(url)
+        nodes = self._catalog_links(html, url)
+        return CatalogResponse(source=self.source, state="USED", nodes=nodes, total=len(nodes))
 
     def resolve_url(self, url: str) -> CatalogResponse:
         html = self._fetch(url)
