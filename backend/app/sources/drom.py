@@ -8,6 +8,7 @@ API_URL = "https://api.drom.ru/v1.2/bulls/search"
 
 class DromAdapter(MarketplaceAdapter):
     name = "drom"
+    capabilities = {"listing_search": True, "catalog": False}
 
     def _params(self, query: SearchQuery) -> dict[str, Any]:
         p: dict[str, Any] = {"page": 1}
