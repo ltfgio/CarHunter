@@ -5,6 +5,7 @@ from app.domain.models import Listing, SearchQuery, FuelType, TransmissionType, 
 
 API_URL = "https://api.drom.ru/v1.2/bulls/search"
 
+
 class DromAdapter(MarketplaceAdapter):
     name = "drom"
 
@@ -20,32 +21,77 @@ class DromAdapter(MarketplaceAdapter):
         if query.power_max_hp is not None: p["maxEnginePower"] = query.power_max_hp
         if query.mileage_min is not None: p["minMileageKm"] = query.mileage_min
         if query.mileage_max is not None: p["maxMileageKm"] = query.mileage_max
-        if query.region: p["regionId"] = query.region
-        if query.model: p["modelId"] = query.model
-        if query.brand: p["firmId"] = query.brand
+
+        native = query.source_params.get(self.name, {})
+        allowed = {
+            "firmId", "modelId", "generationNumber", "restylingNumber",
+            "cityId", "regionId", "frameType", "colorId", "transmissionType",
+            "driveType", "fuelType", "wheel", "distance", "locationType",
+            "isHybrid", "isGboExists", "isDamaged", "isNew", "ph", "withPhoto",
+            "withoutDocuments", "notUsedInRussia", "unsold", "neighborhood",
+            "orderBy", "revertSort", "page",
+        }
+        for key, value in native.items():
+            if key in allowed and value is not None:
+                p[key] = value
+
+        # Unified brand/model/region are intentionally not sent as Drom IDs.
+        # Drom requires numeric firmId/modelId/etc.; the UI/catalog resolver
+        # should put those native IDs into source_params["drom"].
         return p
 
     def search(self, query: SearchQuery) -> list[Listing]:
         try:
-            r = httpx.get(API_URL, params=self._params(query), timeout=15.0, headers={"User-Agent": "CarHunter/0.1"})
-            r.raise_for_status()
-            payload = r.json()
+            response = httpx.get(
+                API_URL,
+                params=self._params(query),
+                timeout=15.0,
+                headers={"User-Agent": "CarHunter/0.1"},
+            )
+            response.raise_for_status()
+            payload = response.json()
         except (httpx.HTTPError, ValueError):
             return []
-        rows = payload.get("offers") or payload.get("items") or payload.get("results") or []
-        if isinstance(rows, dict): rows = rows.get("offers") or rows.get("items") or []
+
+        rows = self._rows(payload)
         return [self._listing(row) for row in rows if isinstance(row, dict)]
+
+    @staticmethod
+    def _rows(payload: Any) -> list[dict[str, Any]]:
+        if isinstance(payload, list):
+            return [x for x in payload if isinstance(x, dict)]
+        if not isinstance(payload, dict):
+            return []
+
+        for key in ("offers", "items", "results", "bulls", "cars"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [x for x in value if isinstance(x, dict)]
+            if isinstance(value, dict):
+                for nested in ("offers", "items", "results", "bulls", "cars"):
+                    child = value.get(nested)
+                    if isinstance(child, list):
+                        return [x for x in child if isinstance(x, dict)]
+        return []
 
     def _listing(self, row: dict[str, Any]) -> Listing:
         oid = str(row.get("id") or row.get("offerId") or row.get("offer_id") or "")
-        url = row.get("url") or (f"https://auto.drom.ru/offer/{oid}/" if oid else "https://auto.drom.ru/")
+        url = row.get("url") or row.get("link") or (
+            f"https://auto.drom.ru/offer/{oid}/" if oid else "https://auto.drom.ru/"
+        )
         return Listing(
-            source=self.name, source_id=oid, url=url, raw_url=url,
+            source=self.name,
+            source_id=oid,
+            url=url,
+            raw_url=url,
             title=str(row.get("title") or row.get("name") or "Drom объявление"),
             price_rub=self._int(row.get("price") or row.get("priceValue")),
-            year=self._int(row.get("year")), mileage_km=self._int(row.get("mileageKm") or row.get("mileage")),
-            brand=self._str(row.get("mark") or row.get("brand")), model=self._str(row.get("model")),
-            generation=self._str(row.get("generation")), body_type=self._str(row.get("frameType") or row.get("bodyType")),
+            year=self._int(row.get("year")),
+            mileage_km=self._int(row.get("mileageKm") or row.get("mileage")),
+            brand=self._str(row.get("mark") or row.get("brand") or row.get("firm")),
+            model=self._str(row.get("model")),
+            generation=self._str(row.get("generation")),
+            body_type=self._str(row.get("frameType") or row.get("bodyType")),
             fuel=self._fuel(row.get("fuelType") or row.get("fuel")),
             displacement_l=self._float(row.get("engineVolume") or row.get("engine_volume")),
             power_hp=self._int(row.get("enginePower") or row.get("power")),
@@ -57,42 +103,59 @@ class DromAdapter(MarketplaceAdapter):
         )
 
     @staticmethod
-    def _str(v: Any) -> str | None: return str(v) if v not in (None, "") else None
+    def _str(v: Any) -> str | None:
+        return str(v) if v not in (None, "") else None
+
     @staticmethod
     def _int(v: Any) -> int | None:
-        try: return int(float(v)) if v not in (None, "") else None
-        except (TypeError, ValueError): return None
+        try:
+            return int(float(v)) if v not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+
     @staticmethod
     def _float(v: Any) -> float | None:
-        try: return float(v) if v not in (None, "") else None
-        except (TypeError, ValueError): return None
+        try:
+            return float(v) if v not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+
     @staticmethod
     def _images(row: dict[str, Any]) -> list[str]:
         photos = row.get("photos") or row.get("images") or []
-        if isinstance(photos, dict): photos = list(photos.values())
-        return [str(x.get("url") if isinstance(x, dict) else x) for x in photos if x]
+        if isinstance(photos, dict):
+            photos = list(photos.values())
+        return [
+            str(x.get("url") or x.get("src") or x.get("image"))
+            for x in photos
+            if (isinstance(x, dict) and (x.get("url") or x.get("src") or x.get("image"))) or isinstance(x, str)
+        ]
+
     @staticmethod
     def _fuel(v: Any) -> FuelType | None:
-        s=str(v).lower()
+        s = str(v).lower()
         if "diesel" in s or "диз" in s: return FuelType.diesel
         if "electric" in s or "элект" in s: return FuelType.electric
         if "hybrid" in s or "гибрид" in s: return FuelType.hybrid
         if "petrol" in s or "gasoline" in s or "бенз" in s: return FuelType.petrol
         return None
+
     @staticmethod
     def _transmission(v: Any) -> TransmissionType | None:
-        s=str(v).lower()
+        s = str(v).lower()
         if "manual" in s or "механ" in s: return TransmissionType.manual
         if "robot" in s or "робот" in s: return TransmissionType.robot
         if "cvt" in s or "вариатор" in s: return TransmissionType.cvt
         if "auto" in s or "автомат" in s: return TransmissionType.automatic
         return None
+
     @staticmethod
     def _drive(v: Any) -> DrivetrainType | None:
-        s=str(v).lower()
+        s = str(v).lower()
         if "front" in s or "перед" in s: return DrivetrainType.fwd
         if "rear" in s or "зад" in s: return DrivetrainType.rwd
         if "all" in s or "4wd" in s or "awd" in s or "пол" in s: return DrivetrainType.awd
         return None
+
 
 adapter = DromAdapter()
