@@ -1,6 +1,53 @@
 from collections.abc import Iterable
 from typing import Any
-from app.domain.models import FilterCondition, FilterGroup, FilterOperator, Listing
+import re
+from app.domain.models import AspirationType, EngineLayout, FilterCondition, FilterGroup, FilterOperator, Listing
+
+_ENGINE_LAYOUT_PATTERNS = [
+    (EngineLayout.v12, r"\bv[\\s-]?12\\b"),
+    (EngineLayout.v10, r"\bv[\\s-]?10\\b"),
+    (EngineLayout.v8, r"\bv[\\s-]?8\\b"),
+    (EngineLayout.v6, r"\bv[\\s-]?6\\b"),
+    (EngineLayout.v4, r"\bv[\\s-]?4\\b"),
+    (EngineLayout.w12, r"\bw[\\s-]?12\\b"),
+    (EngineLayout.w8, r"\bw[\\s-]?8\\b"),
+    (EngineLayout.inline_6, r"\b(?:i|l|r)[\\s-]?6\\b|рядн(?:ая|ый)?\\s*6"),
+    (EngineLayout.inline_5, r"\b(?:i|l|r)[\\s-]?5\\b|рядн(?:ая|ый)?\\s*5"),
+    (EngineLayout.inline_4, r"\b(?:i|l|r)[\\s-]?4\\b|рядн(?:ая|ый)?\\s*4"),
+    (EngineLayout.inline_3, r"\b(?:i|l|r)[\\s-]?3\\b|рядн(?:ая|ый)?\\s*3"),
+    (EngineLayout.flat_6, r"\\bboxer[\\s-]?6\\b|оппозитн(?:ый|ая)?\\s*6"),
+    (EngineLayout.flat_4, r"\\bboxer[\\s-]?4\\b|оппозитн(?:ый|ая)?\\s*4"),
+    (EngineLayout.vr6, r"\\bvr[\\s-]?6\\b"),
+    (EngineLayout.vr5, r"\\bvr[\\s-]?5\\b"),
+]
+
+def _listing_text(listing: Listing) -> str:
+    return " ".join(x for x in (listing.title, listing.description, listing.engine_code, listing.engine_family) if x).casefold()
+
+def enrich_listing_specs(listing: Listing) -> Listing:
+    text = _listing_text(listing)
+    updates: dict[str, Any] = {}
+    if listing.engine_layout is None:
+        for layout, pattern in _ENGINE_LAYOUT_PATTERNS:
+            if re.search(pattern, text, re.IGNORECASE):
+                updates["engine_layout"] = layout
+                break
+    if listing.cylinders is None and updates.get("engine_layout") is not None:
+        layout = updates["engine_layout"]
+        try:
+            updates["cylinders"] = int(layout.value.split("_")[-1])
+        except ValueError:
+            pass
+    if listing.aspiration is None:
+        if re.search(r"\b(?:twin[\\s-]?turbo|bi[\\s-]?turbo|битурбо|двойной\\s+турбо)\b", text):
+            updates["aspiration"] = AspirationType.twin_turbo
+        elif re.search(r"\b(?:turbo|turbocharged|турбо|наддув)\b", text):
+            updates["aspiration"] = AspirationType.turbo
+        elif re.search(r"\b(?:supercharged|компрессор|supercharger)\b", text):
+            updates["aspiration"] = AspirationType.supercharger
+        elif re.search(r"\b(?:naturally\\s+aspirated|атмосферн(?:ый|ая)|na)\b", text):
+            updates["aspiration"] = AspirationType.na
+    return listing.model_copy(update=updates) if updates else listing
 
 
 def _get_field(listing: Listing, field: str) -> Any:
@@ -40,7 +87,7 @@ def match_group(listing: Listing, group: FilterGroup) -> bool:
 
 
 def apply_legacy_filters(listings: Iterable[Listing], query) -> list[Listing]:
-    result = list(listings)
+    result = [enrich_listing_specs(x) for x in listings]
     pairs = [("brand","eq",query.brand),("model","eq",query.model),("generation","eq",query.generation),("body_type","eq",query.body_type),("year","gte",query.year_min),("year","lte",query.year_max),("price_rub","gte",query.price_min),("price_rub","lte",query.price_max),("mileage_km","gte",query.mileage_min),("mileage_km","lte",query.mileage_max),("displacement_l","gte",query.displacement_min_l),("displacement_l","lte",query.displacement_max_l),("cylinders","gte",query.cylinders_min),("cylinders","lte",query.cylinders_max),("power_hp","gte",query.power_min_hp),("power_hp","lte",query.power_max_hp),("fuel","eq",query.fuel),("transmission","eq",query.transmission),("drivetrain","eq",query.drivetrain),("aspiration","eq",query.aspiration),("region","eq",query.region)]
     conditions = [FilterCondition(field=f, operator=FilterOperator(o), value=v) for f,o,v in pairs if v is not None]
     conditions += [FilterCondition(field="text", operator=FilterOperator.contains, value=x) for x in query.keywords]
