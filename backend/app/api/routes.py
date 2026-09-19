@@ -60,6 +60,17 @@ FILTER_FIELDS = [
 def sources() -> list[str]:
     return sorted(adapters)
 
+
+@router.get("/source-capabilities")
+def source_capabilities() -> dict[str, dict]:
+    return {
+        name: {
+            "listing_search": bool(getattr(adapter, "capabilities", {}).get("listing_search", False)),
+            "catalog": bool(getattr(adapter, "capabilities", {}).get("catalog", False)),
+        }
+        for name, adapter in adapters.items()
+    }
+
 @router.get("/filter-fields")
 def filter_fields() -> list[dict]:
     return FILTER_FIELDS
